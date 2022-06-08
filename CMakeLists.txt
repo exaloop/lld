@@ -1,96 +1,93 @@
 set(CMAKE_CXX_STANDARD 17)
 
-# Check if lld is built as a standalone project.
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(lld)
-  cmake_minimum_required(VERSION 3.13.4)
+project(lld)
+cmake_minimum_required(VERSION 3.13.4)
 
-  set(CMAKE_INCLUDE_CURRENT_DIR ON)
-  set(LLD_BUILT_STANDALONE TRUE)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+set(LLD_BUILT_STANDALONE TRUE)
 
-  find_package(LLVM REQUIRED HINTS "${LLVM_CMAKE_DIR}")
-  list(APPEND CMAKE_MODULE_PATH "${LLVM_DIR}")
+find_package(LLVM REQUIRED HINTS "${LLVM_CMAKE_DIR}")
+list(APPEND CMAKE_MODULE_PATH "${LLVM_DIR}")
 
-  # We can't check LLVM_CONFIG here, because find_package(LLVM ...) also sets
-  # LLVM_CONFIG.
-  if (NOT LLVM_CONFIG_FOUND)
-    # Pull values from LLVMConfig.cmake.  We can drop this once the llvm-config
-    # path is removed.
-    set(MAIN_INCLUDE_DIR "${LLVM_INCLUDE_DIR}")
-    set(LLVM_OBJ_DIR "${LLVM_BINARY_DIR}")
-    # N.B. this is just a default value, the CACHE PATHs below can be overriden.
-    set(MAIN_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../llvm")
+# We can't check LLVM_CONFIG here, because find_package(LLVM ...) also sets
+# LLVM_CONFIG.
+if (NOT LLVM_CONFIG_FOUND)
+  # Pull values from LLVMConfig.cmake.  We can drop this once the llvm-config
+  # path is removed.
+  set(MAIN_INCLUDE_DIR "${LLVM_INCLUDE_DIR}")
+  set(LLVM_OBJ_DIR "${LLVM_BINARY_DIR}")
+  # N.B. this is just a default value, the CACHE PATHs below can be overriden.
+  set(MAIN_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../llvm")
+endif()
+
+set(LLVM_MAIN_INCLUDE_DIR "${MAIN_INCLUDE_DIR}" CACHE PATH "Path to llvm/include")
+set(LLVM_BINARY_DIR "${LLVM_OBJ_ROOT}" CACHE PATH "Path to LLVM build tree")
+set(LLVM_MAIN_SRC_DIR "${MAIN_SRC_DIR}" CACHE PATH "Path to LLVM source tree")
+
+find_program(LLVM_TABLEGEN_EXE "llvm-tblgen" ${LLVM_TOOLS_BINARY_DIR}
+  NO_DEFAULT_PATH)
+
+# They are used as destination of target generators.
+set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
+set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
+
+include(AddLLVM)
+include(TableGen)
+include(HandleLLVMOptions)
+include(CheckAtomic)
+
+set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
+
+include_directories("${LLVM_BINARY_DIR}/include" ${LLVM_INCLUDE_DIRS})
+link_directories(${LLVM_LIBRARY_DIRS})
+
+if(LLVM_INCLUDE_TESTS)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  # Check prebuilt llvm/utils.
+  if(EXISTS ${LLVM_TOOLS_BINARY_DIR}/FileCheck${CMAKE_EXECUTABLE_SUFFIX}
+      AND EXISTS ${LLVM_TOOLS_BINARY_DIR}/not${CMAKE_EXECUTABLE_SUFFIX})
+    set(LLVM_UTILS_PROVIDED ON)
   endif()
 
-  set(LLVM_MAIN_INCLUDE_DIR "${MAIN_INCLUDE_DIR}" CACHE PATH "Path to llvm/include")
-  set(LLVM_BINARY_DIR "${LLVM_OBJ_ROOT}" CACHE PATH "Path to LLVM build tree")
-  set(LLVM_MAIN_SRC_DIR "${MAIN_SRC_DIR}" CACHE PATH "Path to LLVM source tree")
-
-  find_program(LLVM_TABLEGEN_EXE "llvm-tblgen" ${LLVM_TOOLS_BINARY_DIR}
-    NO_DEFAULT_PATH)
-
-  # They are used as destination of target generators.
-  set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
-  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
-
-  include(AddLLVM)
-  include(TableGen)
-  include(HandleLLVMOptions)
-  include(CheckAtomic)
-
-  set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
-
-  include_directories("${LLVM_BINARY_DIR}/include" ${LLVM_INCLUDE_DIRS})
-  link_directories(${LLVM_LIBRARY_DIRS})
-
-  if(LLVM_INCLUDE_TESTS)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-    # Check prebuilt llvm/utils.
-    if(EXISTS ${LLVM_TOOLS_BINARY_DIR}/FileCheck${CMAKE_EXECUTABLE_SUFFIX}
-        AND EXISTS ${LLVM_TOOLS_BINARY_DIR}/not${CMAKE_EXECUTABLE_SUFFIX})
+  if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
+    # Note: path not really used, except for checking if lit was found
+    set(LLVM_LIT ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
+    if(NOT LLVM_UTILS_PROVIDED)
+      add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/FileCheck utils/FileCheck)
+      add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/not utils/not)
       set(LLVM_UTILS_PROVIDED ON)
+      set(LLD_TEST_DEPS FileCheck not)
     endif()
-
-    if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
-      # Note: path not really used, except for checking if lit was found
-      set(LLVM_LIT ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
-      if(NOT LLVM_UTILS_PROVIDED)
-        add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/FileCheck utils/FileCheck)
-        add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/not utils/not)
-        set(LLVM_UTILS_PROVIDED ON)
-        set(LLD_TEST_DEPS FileCheck not)
-      endif()
-      set(UNITTEST_DIR ${LLVM_MAIN_SRC_DIR}/utils/unittest)
-      if(EXISTS ${UNITTEST_DIR}/googletest/include/gtest/gtest.h
-          AND NOT EXISTS ${LLVM_LIBRARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}
-          AND EXISTS ${UNITTEST_DIR}/CMakeLists.txt)
-        add_subdirectory(${UNITTEST_DIR} utils/unittest)
-      endif()
-    else()
-      # Seek installed Lit.
-      find_program(LLVM_LIT
-                   NAMES llvm-lit lit.py lit
-                   PATHS "${LLVM_MAIN_SRC_DIR}/utils/lit"
-                   DOC "Path to lit.py")
+    set(UNITTEST_DIR ${LLVM_MAIN_SRC_DIR}/utils/unittest)
+    if(EXISTS ${UNITTEST_DIR}/googletest/include/gtest/gtest.h
+        AND NOT EXISTS ${LLVM_LIBRARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}
+        AND EXISTS ${UNITTEST_DIR}/CMakeLists.txt)
+      add_subdirectory(${UNITTEST_DIR} utils/unittest)
     endif()
+  else()
+    # Seek installed Lit.
+    find_program(LLVM_LIT
+                 NAMES llvm-lit lit.py lit
+                 PATHS "${LLVM_MAIN_SRC_DIR}/utils/lit"
+                 DOC "Path to lit.py")
+  endif()
 
-    if(LLVM_LIT)
-      # Define the default arguments to use with 'lit', and an option for the user
-      # to override.
-      set(LIT_ARGS_DEFAULT "-sv")
-      if (MSVC OR XCODE)
-        set(LIT_ARGS_DEFAULT "${LIT_ARGS_DEFAULT} --no-progress-bar")
-      endif()
-      set(LLVM_LIT_ARGS "${LIT_ARGS_DEFAULT}" CACHE STRING "Default options for lit")
-
-      # On Win32 hosts, provide an option to specify the path to the GnuWin32 tools.
-      if(WIN32 AND NOT CYGWIN)
-        set(LLVM_LIT_TOOLS_DIR "" CACHE PATH "Path to GnuWin32 tools")
-      endif()
-    else()
-      set(LLVM_INCLUDE_TESTS OFF)
+  if(LLVM_LIT)
+    # Define the default arguments to use with 'lit', and an option for the user
+    # to override.
+    set(LIT_ARGS_DEFAULT "-sv")
+    if (MSVC OR XCODE)
+      set(LIT_ARGS_DEFAULT "${LIT_ARGS_DEFAULT} --no-progress-bar")
     endif()
+    set(LLVM_LIT_ARGS "${LIT_ARGS_DEFAULT}" CACHE STRING "Default options for lit")
+
+    # On Win32 hosts, provide an option to specify the path to the GnuWin32 tools.
+    if(WIN32 AND NOT CYGWIN)
+      set(LLVM_LIT_TOOLS_DIR "" CACHE PATH "Path to GnuWin32 tools")
+    endif()
+  else()
+    set(LLVM_INCLUDE_TESTS OFF)
   endif()
 endif()
 
