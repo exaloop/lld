@@ -8,55 +8,40 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(CMAKE_INCLUDE_CURRENT_DIR ON)
   set(LLD_BUILT_STANDALONE TRUE)
 
-  find_program(LLVM_CONFIG_PATH "llvm-config" DOC "Path to llvm-config binary")
-  if(NOT LLVM_CONFIG_PATH)
-    message(FATAL_ERROR "llvm-config not found: specify LLVM_CONFIG_PATH")
+  find_package(LLVM REQUIRED HINTS "${LLVM_CMAKE_DIR}")
+  list(APPEND CMAKE_MODULE_PATH "${LLVM_DIR}")
+
+  # We can't check LLVM_CONFIG here, because find_package(LLVM ...) also sets
+  # LLVM_CONFIG.
+  if (NOT LLVM_CONFIG_FOUND)
+    # Pull values from LLVMConfig.cmake.  We can drop this once the llvm-config
+    # path is removed.
+    set(MAIN_INCLUDE_DIR "${LLVM_INCLUDE_DIR}")
+    set(LLVM_OBJ_DIR "${LLVM_BINARY_DIR}")
+    # N.B. this is just a default value, the CACHE PATHs below can be overriden.
+    set(MAIN_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../llvm")
   endif()
 
-  execute_process(COMMAND "${LLVM_CONFIG_PATH}"
-                          "--obj-root"
-                          "--includedir"
-                          "--cmakedir"
-                          "--src-root"
-                  RESULT_VARIABLE HAD_ERROR
-                  OUTPUT_VARIABLE LLVM_CONFIG_OUTPUT
-                  OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(HAD_ERROR)
-    message(FATAL_ERROR "llvm-config failed with status ${HAD_ERROR}")
-  endif()
+  set(LLVM_MAIN_INCLUDE_DIR "${MAIN_INCLUDE_DIR}" CACHE PATH "Path to llvm/include")
+  set(LLVM_BINARY_DIR "${LLVM_OBJ_ROOT}" CACHE PATH "Path to LLVM build tree")
+  set(LLVM_MAIN_SRC_DIR "${MAIN_SRC_DIR}" CACHE PATH "Path to LLVM source tree")
 
-  string(REGEX REPLACE "[ \t]*[\r\n]+[ \t]*" ";" LLVM_CONFIG_OUTPUT "${LLVM_CONFIG_OUTPUT}")
+  find_program(LLVM_TABLEGEN_EXE "llvm-tblgen" ${LLVM_TOOLS_BINARY_DIR}
+    NO_DEFAULT_PATH)
 
-  list(GET LLVM_CONFIG_OUTPUT 0 OBJ_ROOT)
-  list(GET LLVM_CONFIG_OUTPUT 1 MAIN_INCLUDE_DIR)
-  list(GET LLVM_CONFIG_OUTPUT 2 LLVM_CMAKE_PATH)
-  list(GET LLVM_CONFIG_OUTPUT 3 MAIN_SRC_DIR)
-
-  set(LLVM_OBJ_ROOT ${OBJ_ROOT} CACHE PATH "path to LLVM build tree")
-  set(LLVM_MAIN_INCLUDE_DIR ${MAIN_INCLUDE_DIR} CACHE PATH "path to llvm/include")
-  set(LLVM_MAIN_SRC_DIR ${MAIN_SRC_DIR} CACHE PATH "Path to LLVM source tree")
-
-  file(TO_CMAKE_PATH ${LLVM_OBJ_ROOT} LLVM_BINARY_DIR)
-
-  if(NOT EXISTS "${LLVM_CMAKE_PATH}/LLVMConfig.cmake")
-    message(FATAL_ERROR "LLVMConfig.cmake not found")
-  endif()
-  include("${LLVM_CMAKE_PATH}/LLVMConfig.cmake")
-
-  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_PATH}")
-
-  set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
-  include_directories("${LLVM_BINARY_DIR}/include" ${LLVM_INCLUDE_DIRS})
-  link_directories(${LLVM_LIBRARY_DIRS})
-
-  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
+  # They are used as destination of target generators.
   set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
-  find_program(LLVM_TABLEGEN_EXE "llvm-tblgen" ${LLVM_TOOLS_BINARY_DIR} NO_DEFAULT_PATH)
+  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
 
   include(AddLLVM)
   include(TableGen)
   include(HandleLLVMOptions)
   include(CheckAtomic)
+
+  set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
+
+  include_directories("${LLVM_BINARY_DIR}/include" ${LLVM_INCLUDE_DIRS})
+  link_directories(${LLVM_LIBRARY_DIRS})
 
   if(LLVM_INCLUDE_TESTS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
